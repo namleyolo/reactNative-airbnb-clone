@@ -1,0 +1,80 @@
+version: "3.3"
+services:
+  pgmaster:
+    image: postdock/postgres
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    environment:
+      PARTNER_NODES: "pgmaster,pgslave"
+      CLUSTER_NODE_NETWORK_NAME: pgmaster
+      NODE_PRIORITY: 100
+      NODE_ID: 1
+      NODE_NAME: pgmaster
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      CONFIGS: "listen_addresses:'*'"
+      CLUSTER_NAME: pg_cluster
+      REPLICATION_DB: replication_db
+      REPLICATION_USER: replication_user
+      REPLICATION_PASSWORD: replication_pass 
+    ports:
+      - 5440:5432
+    networks: 
+      - cluster 
+  pgslave:
+    image: postdock/postgres
+    restart: "no"
+    environment:
+      PARTNER_NODES: "pgmaster,pgslave"
+      REPLICATION_PRIMARY_HOST: pgmaster
+      NODE_ID: 2
+      NODE_NAME: pgslave
+      CLUSTER_NODE_NETWORK_NAME: pgslave
+      REPLICATION_PRIMARY_PORT: 5432
+      CONFIGS: "max_replication_slots:10"
+    ports:
+      - 5441:5432
+    networks:
+      - cluster
+  backup:
+    build: 
+      context: ./backup
+    image: postdock/barman
+    environment:
+      REPLICATION_USER: replication_user 
+      REPLICATION_PASSWORD: replication_pass
+      REPLICATION_HOST: pgmaster
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      BACKUP_SCHEDULE: "*/10 */5 * * *"
+    networks: 
+      - cluster
+  pgpool:
+    image: postdock/pgpool
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    environment:
+      PCP_USER: pcp_user
+      PCP_PASSWORD: pcp_pass
+      WAIT_BACKEND_TIMEOUT: 60
+      CHECK_USER: postgres
+      CHECK_PASSWORD: postgres
+      CHECK_PGCONNECT_TIMEOUT: 3
+      DB_USERS: postgres:postgres
+      BACKENDS: "0:pgmaster:5432:1:/var/lib/postgresql/data:ALLOW_TO_FAILOVER,1:pgslave::::,"
+      REQUIRE_MIN_BACKENDS: 0
+      CONFIGS: "num_init_children:250,max_pool:4"   
+    ports: 
+      - 5432:5432
+      - 9898:9898
+    networks: 
+      - cluster
+networks:
+  cluster:
+    driver: bridge
+volumes:
+  pgmaster:
+  pgslave:
+  backup:
